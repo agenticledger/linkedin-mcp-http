@@ -29,6 +29,12 @@ const PORT = parseInt(process.env.PORT || '3100', 10);
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${PORT}`;
 const SLUG = 'linkedin';
 
+// LinkedIn OAuth App credentials (for the /auth/connect flow)
+const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID || '';
+const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET || '';
+const LINKEDIN_REDIRECT_URI = `${SERVER_BASE_URL}/auth/callback`;
+const LINKEDIN_SCOPES = 'openid profile email w_member_social';
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -135,6 +141,175 @@ app.post('/oauth/revoke', (req, res) => {
   const { token } = req.body;
   if (token) oauthTokens.delete(token);
   res.status(200).json({ status: 'revoked' });
+});
+
+// --- LinkedIn OAuth Authorization Flow (for users to get their access token) ---
+
+// Step 1: User visits /auth/connect — shows branded page with "Authorize with LinkedIn" button
+app.get('/auth/connect', (_req, res) => {
+  if (!LINKEDIN_CLIENT_ID) {
+    res.status(500).json({ error: 'LinkedIn OAuth not configured — missing LINKEDIN_CLIENT_ID env var' });
+    return;
+  }
+
+  const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${LINKEDIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(LINKEDIN_REDIRECT_URI)}&scope=${encodeURIComponent(LINKEDIN_SCOPES)}&state=${randomUUID()}`;
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect LinkedIn — AgenticLedger</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--primary:#0A66C2;--fg:#0F172A;--muted:#64748B;--surface:#F8FAFC;--border:#E2E8F0;}
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'DM Sans',sans-serif;color:var(--fg);min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--surface);background-image:linear-gradient(135deg,#EFF6FF 0%,var(--surface) 50%,#F0F9FF 100%);}
+    .card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:48px;max-width:480px;width:100%;margin:20px;box-shadow:0 1px 3px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);text-align:center;}
+    .card img{height:40px;margin-bottom:24px;}
+    h1{font-size:24px;font-weight:700;margin-bottom:8px;}
+    p{color:var(--muted);font-size:14px;line-height:1.6;margin-bottom:24px;}
+    .scopes{text-align:left;background:#F1F5F9;border-radius:10px;padding:16px 20px;margin-bottom:28px;font-size:13px;}
+    .scopes div{display:flex;align-items:center;gap:8px;padding:4px 0;}
+    .scopes div::before{content:'\\2713';color:#10B981;font-weight:700;}
+    .btn{display:inline-block;background:var(--primary);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-size:15px;font-weight:600;font-family:'DM Sans',sans-serif;transition:background .2s;}
+    .btn:hover{background:#004182;}
+    .note{font-size:12px;color:var(--muted);margin-top:20px;line-height:1.5;}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/static/logo.png" alt="AgenticLedger">
+    <h1>Connect Your LinkedIn</h1>
+    <p>Authorize this MCP server to create posts, share articles, upload images, and engage with content on your behalf.</p>
+    <div class="scopes">
+      <div>Read your profile and email</div>
+      <div>Create and delete posts</div>
+      <div>Upload images</div>
+      <div>Like and comment on posts</div>
+    </div>
+    <a href="${authUrl}" class="btn">Authorize with LinkedIn</a>
+    <p class="note">You'll be redirected to LinkedIn to log in. After authorizing, you'll receive an access token valid for 60 days. Your credentials are never stored on this server.</p>
+  </div>
+</body>
+</html>`);
+});
+
+// Step 2: LinkedIn redirects back with auth code — exchange for access token
+app.get('/auth/callback', async (req, res) => {
+  const { code, error, error_description } = req.query;
+
+  if (error) {
+    res.status(400).send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Error</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>body{font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#F8FAFC;}.card{background:#fff;border:1px solid #E2E8F0;border-radius:16px;padding:40px;max-width:480px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06);}h1{color:#EF4444;margin-bottom:12px;}p{color:#64748B;font-size:14px;}a{color:#0A66C2;}</style>
+</head><body><div class="card"><h1>Authorization Failed</h1><p>${error_description || error}</p><p style="margin-top:16px"><a href="/auth/connect">Try again</a></p></div></body></html>`);
+    return;
+  }
+
+  if (!code || !LINKEDIN_CLIENT_ID || !LINKEDIN_CLIENT_SECRET) {
+    res.status(400).json({ error: 'Missing authorization code or server configuration' });
+    return;
+  }
+
+  try {
+    // Exchange code for access token
+    const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code as string,
+        redirect_uri: LINKEDIN_REDIRECT_URI,
+        client_id: LINKEDIN_CLIENT_ID,
+        client_secret: LINKEDIN_CLIENT_SECRET,
+      }),
+    });
+
+    const data: any = await tokenRes.json();
+
+    if (!data.access_token) {
+      res.status(400).send(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Error</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>body{font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#F8FAFC;}.card{background:#fff;border:1px solid #E2E8F0;border-radius:16px;padding:40px;max-width:480px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06);}h1{color:#EF4444;}pre{text-align:left;background:#1E293B;color:#E2E8F0;padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;margin-top:16px;}a{color:#0A66C2;}</style>
+</head><body><div class="card"><h1>Token Exchange Failed</h1><pre>${JSON.stringify(data, null, 2)}</pre><p style="margin-top:16px"><a href="/auth/connect">Try again</a></p></div></body></html>`);
+      return;
+    }
+
+    const expiresInDays = Math.round((data.expires_in || 5184000) / 86400);
+
+    // Build the MCP config for them
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        linkedin: {
+          url: `${SERVER_BASE_URL}/mcp`,
+          headers: { Authorization: `Bearer ${data.access_token}` }
+        }
+      }
+    }, null, 2);
+
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinkedIn Connected — AgenticLedger</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--primary:#0A66C2;--fg:#0F172A;--muted:#64748B;--surface:#F8FAFC;--border:#E2E8F0;--success:#10B981;}
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'DM Sans',sans-serif;color:var(--fg);min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--surface);}
+    .card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:40px;max-width:600px;width:100%;margin:20px;box-shadow:0 8px 24px rgba(0,0,0,.06);}
+    .success{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+    .success-icon{width:32px;height:32px;background:var(--success);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;}
+    h1{font-size:22px;font-weight:700;}
+    .expires{color:var(--muted);font-size:13px;margin-bottom:24px;}
+    .section{margin-bottom:20px;}
+    .section-title{font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;}
+    .copy-btn{background:var(--primary);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer;font-weight:500;}
+    .copy-btn.copied{background:var(--success);}
+    textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;resize:vertical;background:#F8FAFC;}
+    pre{background:#1E293B;color:#E2E8F0;border-radius:10px;padding:16px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.7;overflow-x:auto;white-space:pre;}
+    .warning{background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:12px 16px;font-size:12px;color:#92400E;margin-top:16px;line-height:1.5;}
+    .footer{text-align:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="success"><div class="success-icon">&#10003;</div><h1>LinkedIn Connected!</h1></div>
+    <p class="expires">Your token expires in <strong>${expiresInDays} days</strong>. Come back here to re-authorize when it expires.</p>
+
+    <div class="section">
+      <div class="section-title">Your Access Token <button class="copy-btn" onclick="copyText('tokenBox',this)">Copy</button></div>
+      <textarea id="tokenBox" rows="3" readonly>${data.access_token}</textarea>
+    </div>
+
+    <div class="section">
+      <div class="section-title">MCP Configuration <button class="copy-btn" onclick="copyText('configBox',this)">Copy</button></div>
+      <pre id="configBox">${mcpConfig}</pre>
+    </div>
+
+    <div class="warning">
+      <strong>Keep this token private.</strong> Anyone with this token can post to your LinkedIn. Do not share it publicly. If compromised, revoke it at <a href="https://www.linkedin.com/psettings/permitted-services" target="_blank">LinkedIn Settings</a>.
+    </div>
+
+    <div class="footer">Powered by AgenticLedger &middot; <a href="/" style="color:var(--primary);text-decoration:none;">Back to Server Info</a></div>
+  </div>
+  <script>
+    function copyText(id,btn){
+      var el=document.getElementById(id);
+      var text=el.value||el.textContent;
+      navigator.clipboard.writeText(text).then(function(){
+        btn.textContent='Copied!';btn.classList.add('copied');
+        setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
+      });
+    }
+  </script>
+</body>
+</html>`);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Token exchange failed', details: err.message });
+  }
 });
 
 // --- Smart root route: content negotiation ---
