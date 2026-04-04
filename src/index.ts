@@ -115,6 +115,21 @@ app.post('/oauth/token', (req, res) => {
   });
 });
 
+// GET handler for browsers hitting /oauth/token
+app.get('/oauth/token', (_req, res) => {
+  res.json({
+    endpoint: '/oauth/token',
+    method: 'POST',
+    description: 'Exchange your LinkedIn access token for a time-limited MCP token',
+    usage: {
+      grant_type: 'client_credentials',
+      client_id: SLUG,
+      client_secret: '<your-linkedin-access-token>',
+    },
+    example: `curl -X POST ${SERVER_BASE_URL}/oauth/token -d "grant_type=client_credentials&client_id=${SLUG}&client_secret=<your-token>"`,
+  });
+});
+
 // --- OAuth 2.0 Token Revocation ---
 app.post('/oauth/revoke', (req, res) => {
   const { token } = req.body;
