@@ -29,10 +29,10 @@ const PORT = parseInt(process.env.PORT || '3100', 10);
 const SERVER_BASE_URL = process.env.SERVER_BASE_URL || `http://localhost:${PORT}`;
 const SLUG = 'linkedin';
 
-// LinkedIn OAuth App credentials (for the /auth/connect flow)
+// LinkedIn OAuth App credentials (for the /authorize flow)
 const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID || '';
 const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET || '';
-const LINKEDIN_REDIRECT_URI = `${SERVER_BASE_URL}/auth/callback`;
+const LINKEDIN_REDIRECT_URI = `${SERVER_BASE_URL}/authorize/callback`;
 const LINKEDIN_SCOPES = 'openid profile email w_member_social';
 
 const app = express();
@@ -145,8 +145,8 @@ app.post('/oauth/revoke', (req, res) => {
 
 // --- LinkedIn OAuth Authorization Flow (for users to get their access token) ---
 
-// Step 1: User visits /auth/connect — shows branded page with "Authorize with LinkedIn" button
-app.get('/auth/connect', (_req, res) => {
+// Step 1: User visits /authorize — shows branded page with "Authorize with LinkedIn" button
+app.get('/authorize', (_req, res) => {
   if (!LINKEDIN_CLIENT_ID) {
     res.status(500).json({ error: 'LinkedIn OAuth not configured — missing LINKEDIN_CLIENT_ID env var' });
     return;
@@ -195,7 +195,7 @@ app.get('/auth/connect', (_req, res) => {
 });
 
 // Step 2: LinkedIn redirects back with auth code — exchange for access token
-app.get('/auth/callback', async (req, res) => {
+app.get('/authorize/callback', async (req, res) => {
   const { code, error, error_description } = req.query;
 
   if (error) {
@@ -203,7 +203,7 @@ app.get('/auth/callback', async (req, res) => {
 <html><head><meta charset="UTF-8"><title>Error</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>body{font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#F8FAFC;}.card{background:#fff;border:1px solid #E2E8F0;border-radius:16px;padding:40px;max-width:480px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06);}h1{color:#EF4444;margin-bottom:12px;}p{color:#64748B;font-size:14px;}a{color:#0A66C2;}</style>
-</head><body><div class="card"><h1>Authorization Failed</h1><p>${error_description || error}</p><p style="margin-top:16px"><a href="/auth/connect">Try again</a></p></div></body></html>`);
+</head><body><div class="card"><h1>Authorization Failed</h1><p>${error_description || error}</p><p style="margin-top:16px"><a href="/authorize">Try again</a></p></div></body></html>`);
     return;
   }
 
@@ -233,7 +233,7 @@ app.get('/auth/callback', async (req, res) => {
 <html><head><meta charset="UTF-8"><title>Error</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>body{font-family:'DM Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#F8FAFC;}.card{background:#fff;border:1px solid #E2E8F0;border-radius:16px;padding:40px;max-width:480px;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.06);}h1{color:#EF4444;}pre{text-align:left;background:#1E293B;color:#E2E8F0;padding:16px;border-radius:8px;font-size:12px;overflow-x:auto;margin-top:16px;}a{color:#0A66C2;}</style>
-</head><body><div class="card"><h1>Token Exchange Failed</h1><pre>${JSON.stringify(data, null, 2)}</pre><p style="margin-top:16px"><a href="/auth/connect">Try again</a></p></div></body></html>`);
+</head><body><div class="card"><h1>Token Exchange Failed</h1><pre>${JSON.stringify(data, null, 2)}</pre><p style="margin-top:16px"><a href="/authorize">Try again</a></p></div></body></html>`);
       return;
     }
 
