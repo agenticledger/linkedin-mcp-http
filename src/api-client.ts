@@ -48,7 +48,7 @@ export class LinkedInClient {
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${this.accessToken}`,
       'Accept': 'application/json',
-      'LinkedIn-Version': '202401',
+      'LinkedIn-Version': '202506',
       ...options.headers,
     };
 
