@@ -299,4 +299,113 @@ export class LinkedInClient {
       { method: 'DELETE' }
     );
   }
+
+  // --- Video Upload (REST API) ---
+
+  /** Common headers for the LinkedIn REST Videos API (v202504) */
+  private get videoApiHeaders(): Record<string, string> {
+    return {
+      'LinkedIn-Version': '202504',
+      'X-Restli-Protocol-Version': '2.0.0',
+    };
+  }
+
+  private readonly REST_BASE = 'https://api.linkedin.com/rest';
+
+  /** Initialize a video upload — returns video URN and upload URL */
+  async initializeVideoUpload(ownerUrn: string, fileSizeBytes: number): Promise<any> {
+    return this.request<any>('/videos', {
+      method: 'POST',
+      params: { action: 'initializeUpload' },
+      body: {
+        initializeUploadRequest: {
+          owner: ownerUrn,
+          fileSizeBytes,
+          uploadCaptions: false,
+          uploadThumbnail: false,
+        },
+      },
+      headers: this.videoApiHeaders,
+      baseUrl: this.REST_BASE,
+    });
+  }
+
+  /** Upload video binary to the URL from initializeVideoUpload. Returns the ETag. */
+  async uploadVideoBinary(uploadUrl: string, videoData: Uint8Array): Promise<{ etag: string }> {
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(videoData.byteLength),
+      },
+      body: videoData as any as BodyInit,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`LinkedIn Video Upload Error ${response.status}: ${text}`);
+    }
+
+    const etag = response.headers.get('ETag') || response.headers.get('etag') || '';
+    return { etag };
+  }
+
+  /** Finalize a video upload after binary has been uploaded */
+  async finalizeVideoUpload(videoUrn: string, etag: string): Promise<any> {
+    return this.request<any>('/videos', {
+      method: 'POST',
+      params: { action: 'finalizeUpload' },
+      body: {
+        finalizeUploadRequest: {
+          video: videoUrn,
+          uploadToken: '',
+          uploadedPartIds: [etag],
+        },
+      },
+      headers: this.videoApiHeaders,
+      baseUrl: this.REST_BASE,
+    });
+  }
+
+  /** Get video processing status */
+  async getVideoStatus(videoUrn: string): Promise<any> {
+    return this.request<any>(`/videos/${encodeURIComponent(videoUrn)}`, {
+      headers: this.videoApiHeaders,
+      baseUrl: this.REST_BASE,
+    });
+  }
+
+  /** Create a post with a video */
+  async createVideoPost(params: {
+    authorUrn: string;
+    text: string;
+    videoUrn: string;
+    title?: string;
+    visibility?: 'PUBLIC' | 'CONNECTIONS';
+  }): Promise<any> {
+    return this.request<any>('/posts', {
+      method: 'POST',
+      body: {
+        author: params.authorUrn,
+        commentary: params.text,
+        visibility: params.visibility || 'PUBLIC',
+        distribution: {
+          feedDistribution: 'MAIN_FEED',
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        content: {
+          media: {
+            title: params.title || 'Video',
+            id: params.videoUrn,
+          },
+        },
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
+      },
+      headers: this.videoApiHeaders,
+      baseUrl: this.REST_BASE,
+    });
+  }
 }
