@@ -302,10 +302,10 @@ export class LinkedInClient {
 
   // --- Video Upload (REST API) ---
 
-  /** Common headers for the LinkedIn REST Videos API (v202504) */
+  /** Common headers for the LinkedIn REST Videos API (v202506) */
   private get videoApiHeaders(): Record<string, string> {
     return {
-      'LinkedIn-Version': '202504',
+      'LinkedIn-Version': '202506',
       'X-Restli-Protocol-Version': '2.0.0',
     };
   }
